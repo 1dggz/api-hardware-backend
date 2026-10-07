@@ -21,14 +21,21 @@ class ComponenteViewSet(viewsets.ModelViewSet):
     # Rota: GET /api/componentes/{id}/menor_preco/
     @action(detail=True, methods=['get'])
     def menor_preco(self, request, pk=None):
-        componente = self.get_object() # Pega a peça específica pelo ID 
-        # Filtra o histórico desta peça e ordena do preço mais baixo para o mais alto
-        menor_registro = HistoricoPreco.objects.filter(componente=componente).order_by('preco').first()
-            
-        if menor_registro:
-            serializer = HistoricoPrecoSerializer(menor_registro)
-            return Response(serializer.data)    
-        return Response({"mensagem": "Ainda não há preços registados para esta peça."}, status=404)
+        componente = self.get_object()
+        registros = (HistoricoPreco.objects
+                    .filter(componente=componente)
+                    .select_related('loja')
+                    .order_by('-data_coleta', '-id'))
+
+        ultimo_por_loja = {}
+        for r in registros:
+            ultimo_por_loja.setdefault(r.loja_id, r) 
+
+        if not ultimo_por_loja:
+            return Response({"mensagem": "Ainda não há preços registrados para esta peça."}, status=404)
+
+        menor = min(ultimo_por_loja.values(), key=lambda r: r.preco)
+        return Response(HistoricoPrecoSerializer(menor).data)
 
     # 2. Endpoint: Gráfico JSON dos últimos 6 meses (180 dias)
     # Rota: GET /api/componentes/{id}/grafico/
@@ -54,6 +61,6 @@ class ComponenteViewSet(viewsets.ModelViewSet):
             
         return Response({
             "componente": componente.nome,
-            "total_registos": len(dados_grafico),
+            "total_registros": len(dados_grafico),
             "historico": dados_grafico
         })
